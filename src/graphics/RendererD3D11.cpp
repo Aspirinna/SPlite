@@ -44,7 +44,9 @@ struct Constants
 {
     float viewportSize[2];
     float spriteSize[2];
-    float pad[4];
+    float spritePosition[2];
+    float spriteScale;
+    float spriteOpacity;
 };
 
 RendererD3D11::RendererD3D11() noexcept = default;
@@ -170,18 +172,24 @@ void RendererD3D11::Render()
     context_->PSSetShaderResources(0, 1, spriteView_.GetAddressOf());
     context_->PSSetSamplers(0, 1, samplerState_.GetAddressOf());
 
-    Constants constants{};
-    constants.viewportSize[0] = static_cast<float>(clientWidth_);
-    constants.viewportSize[1] = static_cast<float>(clientHeight_);
-    constants.spriteSize[0]   = static_cast<float>(spriteWidth_);
-    constants.spriteSize[1]   = static_cast<float>(spriteHeight_);
-
-    context_->UpdateSubresource(constantBuffer_.Get(), 0, nullptr, &constants, 0, 0);
-
     context_->OMSetRenderTargets(1, renderTargetView_.GetAddressOf(), nullptr);
     context_->OMSetBlendState(blendState_.Get(), nullptr, 0xFFFFFFFF);
 
-    context_->DrawIndexed(6, 0, 0);
+    // 所有实例共享纹理、几何和管线状态，仅更新轻量的常量缓冲。
+    for (const SpriteTransform& transform : spriteTransforms_)
+    {
+        Constants constants{};
+        constants.viewportSize[0] = static_cast<float>(clientWidth_);
+        constants.viewportSize[1] = static_cast<float>(clientHeight_);
+        constants.spriteSize[0]   = static_cast<float>(spriteWidth_);
+        constants.spriteSize[1]   = static_cast<float>(spriteHeight_);
+        constants.spritePosition[0] = transform.x;
+        constants.spritePosition[1] = transform.y;
+        constants.spriteScale       = transform.scale;
+        constants.spriteOpacity     = transform.opacity;
+        context_->UpdateSubresource(constantBuffer_.Get(), 0, nullptr, &constants, 0, 0);
+        context_->DrawIndexed(6, 0, 0);
+    }
 
     HRESULT hr = swapChain_->Present(1, 0);
     if (FAILED(hr))
@@ -190,19 +198,50 @@ void RendererD3D11::Render()
     }
 }
 
+void RendererD3D11::SetSpriteTransform(float x, float y, float scale, float opacity) noexcept
+{
+    spriteTransforms_ = { SpriteTransform{ x, y, scale, opacity } };
+}
+
+void RendererD3D11::SetSpriteTransforms(const std::vector<SpriteTransform>& transforms)
+{
+    spriteTransforms_ = transforms;
+}
+
 bool RendererD3D11::HitTest(int clientX, int clientY, unsigned char alphaThreshold) const noexcept
 {
-    if (clientX < 0 || clientY < 0 ||
-        clientX >= static_cast<int>(spriteWidth_) ||
-        clientY >= static_cast<int>(spriteHeight_) ||
-        spriteAlpha_.empty())
+    return HitTestSprite(clientX, clientY, alphaThreshold) >= 0;
+}
+
+int RendererD3D11::HitTestSprite(int clientX, int clientY, unsigned char alphaThreshold) const noexcept
+{
+    if (spriteAlpha_.empty())
     {
-        return false;
+        return -1;
     }
 
-    const size_t index = static_cast<size_t>(clientY) * spriteWidth_ +
-                         static_cast<size_t>(clientX);
-    return spriteAlpha_[index] >= alphaThreshold;
+    for (size_t reverseIndex = spriteTransforms_.size(); reverseIndex > 0; --reverseIndex)
+    {
+        const SpriteTransform& transform = spriteTransforms_[reverseIndex - 1];
+        const float safeScale = transform.scale > 0.0f ? transform.scale : 1.0f;
+        const int spriteX = static_cast<int>((clientX - transform.x) / safeScale);
+        const int spriteY = static_cast<int>((clientY - transform.y) / safeScale);
+
+        if (spriteX < 0 || spriteY < 0 ||
+            spriteX >= static_cast<int>(spriteWidth_) ||
+            spriteY >= static_cast<int>(spriteHeight_))
+        {
+            continue;
+        }
+
+        const size_t alphaIndex = static_cast<size_t>(spriteY) * spriteWidth_ +
+                                  static_cast<size_t>(spriteX);
+        if (spriteAlpha_[alphaIndex] >= alphaThreshold)
+        {
+            return static_cast<int>(reverseIndex - 1);
+        }
+    }
+    return -1;
 }
 
 void RendererD3D11::SaveBackBufferToPng(const wchar_t* filePath)

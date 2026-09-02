@@ -4,8 +4,13 @@
 #include "framework.h"
 #include "SPlite.h"
 #include "graphics\RendererD3D11.h"
+#include "model\PetSystem.h"
+#include "data\AppConfig.h"
+#include "platform\windows\StartupManager.h"
+#include "platform\windows\TrayIcon.h"
 
 #include <shellapi.h>
+#include <chrono>
 #include <string>
 #include <windowsx.h>
 
@@ -19,12 +24,15 @@ HWND g_hMainWnd = nullptr;                      // 主窗口句柄（供渲染�
 
 // 当前只有一个窗口和一个渲染器。多角色阶段会把实例管理移出入口文件。
 splite::RendererD3D11 g_renderer;
+splite::PetSystem g_petSystem;
+splite::TrayIcon g_trayIcon;
+splite::AppConfig g_config;
 bool g_topMost = true;
 
-constexpr int kPetWindowWidth  = 256;
-constexpr int kPetWindowHeight = 256;
 constexpr UINT kMenuToggleTopMost = 1001;
 constexpr UINT kMenuExit          = 1002;
+constexpr UINT kMenuToggleStartup = 1003;
+constexpr UINT kTrayCallback      = WM_APP + 42;
 
 // 从可执行文件目录向上寻找仓库内素材，避免依赖某台机器的绝对路径。
 std::wstring GetAssetPath(const wchar_t* fileName)
@@ -45,6 +53,39 @@ std::wstring GetAssetPath(const wchar_t* fileName)
     return root + L"\\assets\\" + fileName;
 }
 
+void ShowPetMenu(HWND hWnd, POINT screenPoint)
+{
+    HMENU menu = CreatePopupMenu();
+    AppendMenuW(menu, MF_STRING | (g_topMost ? MF_CHECKED : 0),
+                kMenuToggleTopMost, L"始终置顶");
+    AppendMenuW(menu, MF_STRING | (splite::StartupManager::IsEnabled() ? MF_CHECKED : 0),
+                kMenuToggleStartup, L"开机启动");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, kMenuExit, L"退出 SPlite");
+
+    SetForegroundWindow(hWnd);
+    const UINT command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+                                        screenPoint.x, screenPoint.y, 0, hWnd, nullptr);
+    DestroyMenu(menu);
+
+    if (command == kMenuToggleTopMost)
+    {
+        g_topMost = !g_topMost;
+        g_config.topMost = g_topMost;
+        g_config.Save();
+        SetWindowPos(hWnd, g_topMost ? HWND_TOPMOST : HWND_NOTOPMOST,
+                     0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+    else if (command == kMenuToggleStartup)
+    {
+        splite::StartupManager::SetEnabled(!splite::StartupManager::IsEnabled());
+    }
+    else if (command == kMenuExit)
+    {
+        DestroyWindow(hWnd);
+    }
+}
+
 // 此代码模块中包含的函数的前向声明:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
@@ -59,6 +100,19 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
 
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+    // 同一用户会话只允许一个实例，避免重复创建多个桌面覆盖窗口。
+    HANDLE singleInstanceMutex = CreateMutexW(nullptr, TRUE, L"Local\\SPlite.SingleInstance");
+    if (singleInstanceMutex && GetLastError() == ERROR_ALREADY_EXISTS)
+    {
+        CloseHandle(singleInstanceMutex);
+        return 0;
+    }
+
+    g_config = splite::AppConfig::Load();
+    g_topMost = g_config.topMost;
+
     // 初始化 COM。WIC 图片解码器依赖 COM 对象。
     HRESULT hrCom = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     const bool comInitialized = SUCCEEDED(hrCom);
@@ -71,8 +125,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // 执行应用程序初始化:
     if (!InitInstance (hInstance, nCmdShow))
     {
+        if (singleInstanceMutex) CloseHandle(singleInstanceMutex);
         return FALSE;
     }
+
+    g_trayIcon.Initialize(g_hMainWnd, hInstance, kTrayCallback);
 
     // 初始化 D3D11 渲染器，并加载一张带 alpha 的测试精灵。
     // 注意：实际产品中这里会换成资源管理器统一加载角色素材。
@@ -85,6 +142,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         if (g_renderer.Initialize(g_hMainWnd, clientWidth, clientHeight))
         {
             g_renderer.LoadSprite(GetAssetPath(L"sprite_test.png"));
+
+            // 两个实例共享同一 PNG/GPU 纹理，用于验证多角色调度和独立拖动。
+            const float groundY = static_cast<float>(clientHeight - 256);
+            g_petSystem.AddPet(L"pet-main", static_cast<float>(clientWidth - 280), groundY);
+            g_petSystem.AddPet(L"pet-companion", static_cast<float>(clientWidth - 530), groundY, 0.82f);
         }
         else
         {
@@ -94,6 +156,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     MSG msg = {};
     bool running = true;
+    auto previousFrame = std::chrono::steady_clock::now();
     while (running)
     {
         // 泵消息：一次处理完所有已排队消息，避免阻塞。
@@ -108,13 +171,26 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             DispatchMessage(&msg);
         }
 
-        // 渲染一帧。这里会在消息空闲时持续刷新，保证动画连续。
+        const auto currentFrame = std::chrono::steady_clock::now();
+        const float deltaSeconds = std::chrono::duration<float>(currentFrame - previousFrame).count();
+        previousFrame = currentFrame;
+
+        g_petSystem.Update(deltaSeconds);
+        g_renderer.SetSpriteTransforms(g_petSystem.BuildRenderTransforms());
+
+        // 渲染一帧。动画更新时间与消息处理相互独立。
         g_renderer.Render();
     }
 
     if (comInitialized)
     {
         CoUninitialize();
+    }
+
+    if (singleInstanceMutex)
+    {
+        ReleaseMutex(singleInstanceMutex);
+        CloseHandle(singleInstanceMutex);
     }
 
     return (int) msg.wParam;
@@ -158,14 +234,20 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    RECT workArea = {};
    SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0);
-   const int x = workArea.right - kPetWindowWidth - 32;
-   const int y = workArea.bottom - kPetWindowHeight - 32;
+   const int x = workArea.left;
+   const int y = workArea.top;
+   const int width = workArea.right - workArea.left;
+   const int height = workArea.bottom - workArea.top;
 
    // 工具窗口不会出现在任务栏；NOREDIRECTIONBITMAP 让 DirectComposition
    // 直接提供窗口内容；TOPMOST 让宠物保持在普通应用上方。
-   const DWORD exStyle = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP;
+   DWORD exStyle = WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP;
+   if (g_topMost)
+   {
+       exStyle |= WS_EX_TOPMOST;
+   }
    HWND hWnd = CreateWindowExW(exStyle, szWindowClass, szTitle, WS_POPUP,
-      x, y, kPetWindowWidth, kPetWindowHeight,
+      x, y, width, height,
       nullptr, nullptr, hInstance, nullptr);
 
    if (!hWnd)
@@ -203,35 +285,45 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             return HTCLIENT;
         }
     case WM_LBUTTONDOWN:
-        // 把实体像素上的左键按下转换为标题栏拖动，实现无边框窗口拖拽。
-        ReleaseCapture();
-        SendMessageW(hWnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+        {
+            const int x = GET_X_LPARAM(lParam);
+            const int y = GET_Y_LPARAM(lParam);
+            const int petIndex = g_renderer.HitTestSprite(x, y);
+            if (g_petSystem.BeginDrag(petIndex, x, y))
+            {
+                SetCapture(hWnd);
+            }
+        }
+        return 0;
+    case WM_MOUSEMOVE:
+        if (g_petSystem.IsDragging())
+        {
+            RECT client = {};
+            GetClientRect(hWnd, &client);
+            g_petSystem.DragTo(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam),
+                               client.right, client.bottom);
+        }
+        return 0;
+    case WM_LBUTTONUP:
+        if (g_petSystem.IsDragging())
+        {
+            g_petSystem.EndDrag();
+            ReleaseCapture();
+        }
         return 0;
     case WM_RBUTTONUP:
         {
             POINT point = {};
             GetCursorPos(&point);
-
-            HMENU menu = CreatePopupMenu();
-            AppendMenuW(menu, MF_STRING | (g_topMost ? MF_CHECKED : 0),
-                        kMenuToggleTopMost, L"始终置顶");
-            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-            AppendMenuW(menu, MF_STRING, kMenuExit, L"退出 SPlite");
-            SetForegroundWindow(hWnd);
-            const UINT command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
-                                                point.x, point.y, 0, hWnd, nullptr);
-            DestroyMenu(menu);
-
-            if (command == kMenuToggleTopMost)
-            {
-                g_topMost = !g_topMost;
-                SetWindowPos(hWnd, g_topMost ? HWND_TOPMOST : HWND_NOTOPMOST,
-                             0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            }
-            else if (command == kMenuExit)
-            {
-                DestroyWindow(hWnd);
-            }
+            ShowPetMenu(hWnd, point);
+        }
+        return 0;
+    case kTrayCallback:
+        if (LOWORD(lParam) == WM_RBUTTONUP || LOWORD(lParam) == WM_CONTEXTMENU)
+        {
+            POINT point = {};
+            GetCursorPos(&point);
+            ShowPetMenu(hWnd, point);
         }
         return 0;
     case WM_PAINT:
@@ -256,6 +348,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
     case WM_DESTROY:
+        g_trayIcon.Shutdown();
         g_renderer.Shutdown();
         PostQuitMessage(0);
         break;

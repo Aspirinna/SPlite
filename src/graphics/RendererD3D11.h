@@ -24,6 +24,14 @@ struct Vertex
     float uv[2];    // u, v（纹理坐标，0..1）
 };
 
+struct SpriteTransform
+{
+    float x       = 0.0f;
+    float y       = 0.0f;
+    float scale   = 1.0f;
+    float opacity = 1.0f;
+};
+
 // D3D11 渲染器。
 // 对外暴露最少的接口：
 //   Initialize -> 创建设备和交换链
@@ -53,9 +61,18 @@ public:
     // 将当前精灵绘制到屏幕，并提交到交换链。
     void Render();
 
+    // 设置动画层计算出的精灵变换。位置以客户区像素为单位。
+    void SetSpriteTransform(float x, float y, float scale, float opacity) noexcept;
+
+    // 一次提交同一共享纹理的多个角色实例。
+    void SetSpriteTransforms(const std::vector<SpriteTransform>& transforms);
+
     // 根据精灵原图的 alpha 通道判断客户区坐标是否落在可见像素上。
     // 透明区域返回 false，窗口层据此把鼠标事件交给下方应用。
     bool HitTest(int clientX, int clientY, unsigned char alphaThreshold = 16) const noexcept;
+
+    // 返回命中的实例下标；-1 表示透明区域。后加入的实例视为位于上层。
+    int HitTestSprite(int clientX, int clientY, unsigned char alphaThreshold = 16) const noexcept;
 
     // 调试：把当前后备缓冲区内容读取并保存为 PNG，用于验证渲染结果。
     void SaveBackBufferToPng(const wchar_t* filePath);
@@ -108,6 +125,8 @@ private:
     // 精灵的原始像素尺寸，用于计算显示位置。
     unsigned int spriteWidth_  = 0;
     unsigned int spriteHeight_ = 0;
+
+    std::vector<SpriteTransform> spriteTransforms_ = { SpriteTransform{} };
 
     // 保留一份 CPU 端 alpha 数据，仅用于逐像素鼠标命中检测。
     std::vector<unsigned char> spriteAlpha_;

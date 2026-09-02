@@ -30,6 +30,13 @@
     <ClInclude Include="src\graphics\RendererD3D11.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="src\animation\IAnimationPlayer.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\animation\ProceduralAnimator.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\animation\SpineAnimator.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\model\PetSystem.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\data\AppConfig.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\platform\windows\StartupManager.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\platform\windows\TrayIcon.h"><Filter>头文件</Filter></ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\SPlite.cpp">
@@ -38,6 +45,12 @@
     <ClCompile Include="src\graphics\RendererD3D11.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="src\animation\ProceduralAnimator.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\animation\SpineAnimator.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\model\PetSystem.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\data\AppConfig.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\platform\windows\StartupManager.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\platform\windows\TrayIcon.cpp"><Filter>源文件</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="res\SPlite.rc">

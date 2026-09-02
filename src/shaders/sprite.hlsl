@@ -8,7 +8,9 @@ cbuffer Constants : register(b0)
 {
     float2 viewportSize;   // 窗口客户区像素宽高
     float2 spriteSize;     // 精灵像素宽高
-    float4 pad;            // 补齐到 16 字节
+    float2 spritePosition; // 精灵左上角位置
+    float  spriteScale;    // 统一缩放
+    float  spriteOpacity;  // 整体透明度
 };
 
 struct VSInput
@@ -30,8 +32,9 @@ VSOutput VSMain(VSInput input)
 
     // NDC 范围是 [-1, 1]。像素中心(0,0) 在视口左上角。
     float2 ndc;
-    ndc.x = (input.pos.x / viewportSize.x) * 2.0f - 1.0f;
-    ndc.y = 1.0f - (input.pos.y / viewportSize.y) * 2.0f;
+    float2 pixelPosition = input.pos.xy * spriteScale + spritePosition;
+    ndc.x = (pixelPosition.x / viewportSize.x) * 2.0f - 1.0f;
+    ndc.y = 1.0f - (pixelPosition.y / viewportSize.y) * 2.0f;
 
     output.pos = float4(ndc, 0.0f, 1.0f);
     output.uv  = input.uv;
@@ -46,5 +49,6 @@ float4 PSMain(VSOutput input) : SV_TARGET
 {
     // DirectComposition 使用预乘 alpha：RGB 必须先乘以透明度。
     float4 color = spriteTexture.Sample(spriteSampler, input.uv);
+    color.a *= spriteOpacity;
     return float4(color.rgb * color.a, color.a);
 }

@@ -146,11 +146,24 @@
     <ClInclude Include="src\Resource.h" />
     <ClInclude Include="src\targetver.h" />
     <ClInclude Include="src\SPlite.h" />
+    <ClInclude Include="src\animation\IAnimationPlayer.h" />
+    <ClInclude Include="src\animation\ProceduralAnimator.h" />
+    <ClInclude Include="src\animation\SpineAnimator.h" />
+    <ClInclude Include="src\data\AppConfig.h" />
     <ClInclude Include="src\graphics\RendererD3D11.h" />
+    <ClInclude Include="src\model\PetSystem.h" />
+    <ClInclude Include="src\platform\windows\StartupManager.h" />
+    <ClInclude Include="src\platform\windows\TrayIcon.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\SPlite.cpp" />
+    <ClCompile Include="src\animation\ProceduralAnimator.cpp" />
+    <ClCompile Include="src\animation\SpineAnimator.cpp" />
+    <ClCompile Include="src\data\AppConfig.cpp" />
     <ClCompile Include="src\graphics\RendererD3D11.cpp" />
+    <ClCompile Include="src\model\PetSystem.cpp" />
+    <ClCompile Include="src\platform\windows\StartupManager.cpp" />
+    <ClCompile Include="src\platform\windows\TrayIcon.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="src\shaders\sprite.hlsl" />
