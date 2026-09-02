@@ -3,6 +3,7 @@
 
 #include "framework.h"
 #include "SPlite.h"
+#include "graphics\RendererD3D11.h"
 
 #define MAX_LOADSTRING 100
 
@@ -10,6 +11,11 @@
 HINSTANCE hInst;                                // 当前实例
 WCHAR szTitle[MAX_LOADSTRING];                  // 标题栏文本
 WCHAR szWindowClass[MAX_LOADSTRING];            // 主窗口类名
+HWND g_hMainWnd = nullptr;                      // 主窗口句柄（供渲染器使用）
+
+// 渲染器：当前阶段在普通窗口内渲染一张透明 PNG 精灵。
+// 后续阶段会把它扩展成“透明置顶桌宠窗口”的核心渲染组件。
+splite::RendererD3D11 g_renderer;
 
 // 此代码模块中包含的函数的前向声明:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -25,7 +31,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
 
-    // TODO: 在此处放置代码。
+    // 初始化 COM。WIC 图片解码器依赖 COM 对象。
+    HRESULT hrCom = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool comInitialized = SUCCEEDED(hrCom);
 
     // 初始化全局字符串
     LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
@@ -38,24 +46,57 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         return FALSE;
     }
 
+    // 初始化 D3D11 渲染器，并加载一张带 alpha 的测试精灵。
+    // 注意：实际产品中这里会换成资源管理器统一加载角色素材。
+    {
+        RECT rc = {};
+        GetClientRect(g_hMainWnd, &rc);
+        const int clientWidth  = rc.right - rc.left;
+        const int clientHeight = rc.bottom - rc.top;
+
+        if (g_renderer.Initialize(g_hMainWnd, clientWidth, clientHeight))
+        {
+            // 加载测试精灵。后续会改为统一资源路径，不再依赖绝对路径。
+            g_renderer.LoadSprite(L"D:\\Git\\SPlite\\assets\\sprite_test.png");
+        }
+        else
+        {
+            // 渲染器失败的场景需在后续阶段完善（如弹出提示、降级为纯 Win32）。
+        }
+    }
+
     HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_SPLITE));
 
-    MSG msg;
-
-    // 主消息循环:
-    while (GetMessage(&msg, nullptr, 0, 0))
+    MSG msg = {};
+    bool running = true;
+    while (running)
     {
-        if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
+        // 泵消息：一次处理完所有已排队消息，避免阻塞。
+        while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
         {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
+            if (msg.message == WM_QUIT)
+            {
+                running = false;
+                break;
+            }
+            if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
+            {
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
         }
+
+        // 渲染一帧。这里会在消息空闲时持续刷新，保证动画连续。
+        g_renderer.Render();
+    }
+
+    if (comInitialized)
+    {
+        CoUninitialize();
     }
 
     return (int) msg.wParam;
 }
-
-
 
 //
 //  函数: MyRegisterClass()
@@ -84,18 +125,13 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 }
 
 //
-//   函数: InitInstance(HINSTANCE, int)
+//  函数: InitInstance(HINSTANCE, int)
 //
-//   目标: 保存实例句柄并创建主窗口
-//
-//   注释:
-//
-//        在此函数中，我们在全局变量中保存实例句柄并
-//        创建和显示主程序窗口。
+//  目标: 保存实例句柄并创建主窗口
 //
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
-   hInst = hInstance; // 将实例句柄存储在全局变量中
+   hInst = hInstance;
 
    HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
       CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
@@ -104,6 +140,9 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    {
       return FALSE;
    }
+
+   // 保存主窗口句柄，供 wWinMain 后续初始化渲染器使用。
+   g_hMainWnd = hWnd;
 
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
@@ -116,11 +155,6 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 //
 //  目标: 处理主窗口的消息。
 //
-//  WM_COMMAND  - 处理应用程序菜单
-//  WM_PAINT    - 绘制主窗口
-//  WM_DESTROY  - 发送退出消息并返回
-//
-//
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
@@ -128,7 +162,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_COMMAND:
         {
             int wmId = LOWORD(wParam);
-            // 分析菜单选择:
             switch (wmId)
             {
             case IDM_ABOUT:
@@ -146,11 +179,25 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             PAINTSTRUCT ps;
             BeginPaint(hWnd, &ps);
-            // TODO: 在此处添加任何绘图代码...
+            // 实际绘制由主消息循环调用 g_renderer.Render() 完成。
+            // 这里只用于正确提交 WM_PAINT 的无效区域。
             EndPaint(hWnd, &ps);
         }
         break;
+    case WM_SIZE:
+        {
+            // 客户区尺寸变化时，让渲染器重建后备缓冲区。
+            const int w = LOWORD(lParam);
+            const int h = HIWORD(lParam);
+            if (w > 0 && h > 0)
+            {
+                g_renderer.OnResize(w, h);
+                InvalidateRect(hWnd, nullptr, FALSE);
+            }
+        }
+        break;
     case WM_DESTROY:
+        g_renderer.Shutdown();
         PostQuitMessage(0);
         break;
     default:

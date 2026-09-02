@@ -1,0 +1,19 @@
+# 统一行尾：文本文件用 LF，避免 Windows 与 GitHub 之间的 CRLF 噪音
+* text=auto
+
+# C/C++ 源码与头文件：规定为 UTF-8 编码，避免中文注释被损坏
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.hlsl text eol=lf
+*.rc text eol=lf
+
+# 资源文件与二进制保持原样（不转换）
+*.ico binary
+*.png binary
+
+# 脚本与配置文件
+*.slnx text eol=lf
+*.vcxproj text eol=lf
+*.filters text eol=lf
+*.md text eol=lf
