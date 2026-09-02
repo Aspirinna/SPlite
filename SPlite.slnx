@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="SPlite.vcxproj" Id="0f820af6-eea9-4341-a4a7-c896c389a5ed" />
+</Solution>

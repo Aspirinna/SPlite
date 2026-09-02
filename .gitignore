@@ -1,0 +1,69 @@
+# Build outputs
+[Dd]ebug/
+[Rr]elease/
+x64/
+[Xx]86/
+*.obj
+*.o
+*.pch
+*.pdb
+*.ilk
+*.idb
+*.res
+*.tlog/
+*.lastbuildstate
+*.log
+*.recipe
+*.manifest
+*.map
+*.ilk
+*.ipdb
+*.iobj
+
+# Visual Studio / IDE state
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+CMakeUserPresets.json
+
+# NuGet
+packages/
+*.nupkg
+
+# Spine / runtime generated
+*.atlas
+*.skel
+*.spine
+
+# Steamworks SDK (large, license-restricted)
+third_party/steamworks/
+
+# Local config / secrets
+*.local
+.env
+.env.local
+config.local.json
+
+# OS / editor noise
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.tmp
+
+# Tests
+TestResults/
+*.trx
+
+# Temporary / scratch
+tmp/
+scratch/
