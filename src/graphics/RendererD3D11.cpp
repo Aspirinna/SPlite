@@ -401,9 +401,15 @@ bool RendererD3D11::CreateShaderResources()
     std::wstring root(exePath);
     const size_t lastSlash = root.find_last_of(L"\\/");
     if (lastSlash != std::wstring::npos) root.resize(lastSlash);
-    root = root.substr(0, root.find_last_of(L"\\/"));
-    root = root.substr(0, root.find_last_of(L"\\/"));
-    const std::wstring shaderPath = root + L"\\src\\shaders\\sprite.hlsl";
+
+    // 安装包把着色器放在 exe 旁的 shaders 目录；开发构建则从仓库读取。
+    std::wstring shaderPath = root + L"\\shaders\\sprite.hlsl";
+    if (GetFileAttributesW(shaderPath.c_str()) == INVALID_FILE_ATTRIBUTES)
+    {
+        root = root.substr(0, root.find_last_of(L"\\/"));
+        root = root.substr(0, root.find_last_of(L"\\/"));
+        shaderPath = root + L"\\src\\shaders\\sprite.hlsl";
+    }
 
     Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;

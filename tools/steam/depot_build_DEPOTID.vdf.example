@@ -1,0 +1,13 @@
+"DepotBuildConfig"
+{
+    "DepotID" "替换为你的_DEPOT_ID"
+    "ContentRoot" "..\\..\\..\\dist\\SPlite"
+    "FileMapping"
+    {
+        "LocalPath" "*"
+        "DepotPath" "."
+        "recursive" "1"
+    }
+    "FileExclusion" "*.pdb"
+    "FileExclusion" "steam_appid.txt"
+}

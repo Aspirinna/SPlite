@@ -8,6 +8,7 @@
 #include "data\AppConfig.h"
 #include "platform\windows\StartupManager.h"
 #include "platform\windows\TrayIcon.h"
+#include "steam\SteamService.h"
 
 #include <shellapi.h>
 #include <chrono>
@@ -27,6 +28,7 @@ splite::RendererD3D11 g_renderer;
 splite::PetSystem g_petSystem;
 splite::TrayIcon g_trayIcon;
 splite::AppConfig g_config;
+splite::SteamService g_steamService;
 bool g_topMost = true;
 
 constexpr UINT kMenuToggleTopMost = 1001;
@@ -41,6 +43,17 @@ std::wstring GetAssetPath(const wchar_t* fileName)
     GetModuleFileNameW(nullptr, exePath, MAX_PATH);
 
     std::wstring root(exePath);
+    const size_t executableSlash = root.find_last_of(L"\\/");
+    if (executableSlash != std::wstring::npos)
+    {
+        const std::wstring packagedPath = root.substr(0, executableSlash) +
+                                          L"\\assets\\" + fileName;
+        if (GetFileAttributesW(packagedPath.c_str()) != INVALID_FILE_ATTRIBUTES)
+        {
+            return packagedPath;
+        }
+    }
+
     for (int level = 0; level < 3; ++level)
     {
         const size_t slash = root.find_last_of(L"\\/");
@@ -130,6 +143,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     }
 
     g_trayIcon.Initialize(g_hMainWnd, hInstance, kTrayCallback);
+    g_steamService.Initialize();
 
     // 初始化 D3D11 渲染器，并加载一张带 alpha 的测试精灵。
     // 注意：实际产品中这里会换成资源管理器统一加载角色素材。
@@ -139,10 +153,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         const int clientWidth  = rc.right - rc.left;
         const int clientHeight = rc.bottom - rc.top;
 
-        if (g_renderer.Initialize(g_hMainWnd, clientWidth, clientHeight))
+        const bool rendererReady = g_renderer.Initialize(g_hMainWnd, clientWidth, clientHeight) &&
+                                   g_renderer.LoadSprite(GetAssetPath(L"sprite_test.png"));
+        if (rendererReady)
         {
-            g_renderer.LoadSprite(GetAssetPath(L"sprite_test.png"));
-
             // 两个实例共享同一 PNG/GPU 纹理，用于验证多角色调度和独立拖动。
             const float groundY = static_cast<float>(clientHeight - 256);
             g_petSystem.AddPet(L"pet-main", static_cast<float>(clientWidth - 280), groundY);
@@ -150,7 +164,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
         else
         {
-            // 渲染器失败的场景需在后续阶段完善（如弹出提示、降级为纯 Win32）。
+            MessageBoxW(g_hMainWnd,
+                        L"图形系统或角色素材加载失败。请查看临时目录中的 SPlite_renderer.log。",
+                        L"SPlite 启动失败", MB_OK | MB_ICONERROR);
+            DestroyWindow(g_hMainWnd);
         }
     }
 
@@ -176,6 +193,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         previousFrame = currentFrame;
 
         g_petSystem.Update(deltaSeconds);
+        g_steamService.Update();
         g_renderer.SetSpriteTransforms(g_petSystem.BuildRenderTransforms());
 
         // 渲染一帧。动画更新时间与消息处理相互独立。
@@ -186,6 +204,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     {
         CoUninitialize();
     }
+    g_steamService.Shutdown();
 
     if (singleInstanceMutex)
     {

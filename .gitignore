@@ -2,6 +2,11 @@
 [Dd]ebug/
 [Rr]elease/
 x64/
+dist/
+steam_appid.txt
+steam_api64.dll
+tools/steam/*.vdf
+!tools/steam/*.vdf.example
 [Xx]86/
 *.obj
 *.o

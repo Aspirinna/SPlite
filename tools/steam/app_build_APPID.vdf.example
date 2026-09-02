@@ -1,0 +1,13 @@
+"AppBuild"
+{
+    "AppID" "替换为你的_APP_ID"
+    "Desc" "SPlite Windows 构建"
+    "Preview" "1"
+    "SetLive" ""
+    "ContentRoot" "..\\..\\..\\dist\\SPlite"
+    "BuildOutput" "..\\output"
+    "Depots"
+    {
+        "替换为你的_DEPOT_ID" "depot_build_DEPOTID.vdf"
+    }
+}

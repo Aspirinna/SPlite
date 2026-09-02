@@ -37,6 +37,7 @@
     <ClInclude Include="src\data\AppConfig.h"><Filter>头文件</Filter></ClInclude>
     <ClInclude Include="src\platform\windows\StartupManager.h"><Filter>头文件</Filter></ClInclude>
     <ClInclude Include="src\platform\windows\TrayIcon.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\steam\SteamService.h"><Filter>头文件</Filter></ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\SPlite.cpp">
@@ -51,6 +52,7 @@
     <ClCompile Include="src\data\AppConfig.cpp"><Filter>源文件</Filter></ClCompile>
     <ClCompile Include="src\platform\windows\StartupManager.cpp"><Filter>源文件</Filter></ClCompile>
     <ClCompile Include="src\platform\windows\TrayIcon.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\steam\SteamService.cpp"><Filter>源文件</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="res\SPlite.rc">

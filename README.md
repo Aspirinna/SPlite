@@ -25,6 +25,8 @@
 - 统一动画接口与待机、交互、拖动、睡眠状态
 - 单设备多角色调度和共享纹理
 - 系统托盘、单实例运行、设置持久化和开机启动开关
+- 独立核心测试、Windows CI 和可复现 Release 打包
+- 可选 Steamworks 生命周期与成就接口
 
 ## Spine 接入说明
 
@@ -35,6 +37,15 @@
 ## 构建
 
 使用 Visual Studio 打开 `SPlite.slnx`，选择 `x64` + `Debug` 配置编译即可。
+
+生成经过测试的发布目录：
+
+```powershell
+.\scripts\package-release.ps1
+```
+
+架构说明见 `docs/ARCHITECTURE.md`，Steamworks 接入见 `docs/STEAM.md`，发布前逐项检查
+`docs/RELEASE_CHECKLIST.md`。
 
 ## 目录结构
 
