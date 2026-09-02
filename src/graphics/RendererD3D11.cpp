@@ -2,12 +2,13 @@
 
 #include <d3dcompiler.h>
 #include <wincodec.h>
-#include <dxgi.h>
+#include <dxgi1_2.h>
 #include <cstring>
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 #pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "dcomp.lib")
 #pragma comment(lib, "windowscodecs.lib")
 
 namespace splite
@@ -113,6 +114,12 @@ bool RendererD3D11::LoadSprite(const std::wstring& filePath)
     CHECK_HR_LOG(converter->CopyPixels(nullptr, rowPitch, static_cast<UINT>(pixels.size()), pixels.data()),
                 "LoadSprite FAIL: CopyPixels");
 
+    spriteAlpha_.resize(static_cast<size_t>(width) * height);
+    for (size_t pixelIndex = 0; pixelIndex < spriteAlpha_.size(); ++pixelIndex)
+    {
+        spriteAlpha_[pixelIndex] = pixels[pixelIndex * 4 + 3];
+    }
+
     D3D11_TEXTURE2D_DESC texDesc{};
     texDesc.Width            = width;
     texDesc.Height           = height;
@@ -147,7 +154,8 @@ void RendererD3D11::Render()
         return;
     }
 
-    const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    // 合成窗口必须以完全透明色清屏。RGB 也清零，满足预乘 alpha 约定。
+    const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     context_->ClearRenderTargetView(renderTargetView_.Get(), clearColor);
 
     context_->IASetInputLayout(inputLayout_.Get());
@@ -180,6 +188,21 @@ void RendererD3D11::Render()
     {
         WriteLog("Render Present FAIL");
     }
+}
+
+bool RendererD3D11::HitTest(int clientX, int clientY, unsigned char alphaThreshold) const noexcept
+{
+    if (clientX < 0 || clientY < 0 ||
+        clientX >= static_cast<int>(spriteWidth_) ||
+        clientY >= static_cast<int>(spriteHeight_) ||
+        spriteAlpha_.empty())
+    {
+        return false;
+    }
+
+    const size_t index = static_cast<size_t>(clientY) * spriteWidth_ +
+                         static_cast<size_t>(clientX);
+    return spriteAlpha_[index] >= alphaThreshold;
 }
 
 void RendererD3D11::SaveBackBufferToPng(const wchar_t* filePath)
@@ -245,6 +268,7 @@ void RendererD3D11::Shutdown()
 {
     spriteView_.Reset();
     spriteTexture_.Reset();
+    spriteAlpha_.clear();
     blendState_.Reset();
     samplerState_.Reset();
     constantBuffer_.Reset();
@@ -254,6 +278,9 @@ void RendererD3D11::Shutdown()
     pixelShader_.Reset();
     vertexShader_.Reset();
     renderTargetView_.Reset();
+    compositionVisual_.Reset();
+    compositionTarget_.Reset();
+    compositionDevice_.Reset();
     swapChain_.Reset();
     context_.Reset();
     device_.Reset();
@@ -265,25 +292,51 @@ bool RendererD3D11::CreateDeviceAndSwapChain(HWND hwnd, int width, int height)
     clientWidth_  = width;
     clientHeight_ = height;
 
-    DXGI_SWAP_CHAIN_DESC scd{};
-    scd.BufferDesc.Width  = width;
-    scd.BufferDesc.Height = height;
-    scd.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    scd.BufferDesc.RefreshRate.Numerator   = 60;
-    scd.BufferDesc.RefreshRate.Denominator = 1;
-    scd.SampleDesc.Count   = 1;
-    scd.BufferUsage        = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    scd.BufferCount        = 2;
-    scd.OutputWindow       = hwnd;
-    scd.Windowed           = TRUE;
-    scd.SwapEffect         = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-
     const D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0 };
     D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
 
-    CHECK_HR(D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0,
+    UINT deviceFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+#if defined(_DEBUG)
+    deviceFlags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif
+    CHECK_HR(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, deviceFlags,
                 levels, ARRAYSIZE(levels), D3D11_SDK_VERSION,
-                &scd, &swapChain_, &device_, &featureLevel, &context_));
+                &device_, &featureLevel, &context_));
+
+    Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice;
+    CHECK_HR(device_.As(&dxgiDevice));
+
+    Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+    CHECK_HR(dxgiDevice->GetAdapter(&adapter));
+
+    Microsoft::WRL::ComPtr<IDXGIFactory2> factory;
+    CHECK_HR(adapter->GetParent(IID_PPV_ARGS(&factory)));
+
+    DXGI_SWAP_CHAIN_DESC1 scd{};
+    scd.Width       = static_cast<UINT>(width);
+    scd.Height      = static_cast<UINT>(height);
+    scd.Format      = DXGI_FORMAT_B8G8R8A8_UNORM;
+    scd.Stereo      = FALSE;
+    scd.SampleDesc.Count = 1;
+    scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    scd.BufferCount = 2;
+    scd.Scaling     = DXGI_SCALING_STRETCH;
+    scd.SwapEffect  = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+    scd.AlphaMode   = DXGI_ALPHA_MODE_PREMULTIPLIED;
+
+    Microsoft::WRL::ComPtr<IDXGISwapChain1> compositionSwapChain;
+    CHECK_HR(factory->CreateSwapChainForComposition(device_.Get(), &scd, nullptr,
+                                                      &compositionSwapChain));
+    CHECK_HR(compositionSwapChain.As(&swapChain_));
+
+    CHECK_HR(DCompositionCreateDevice(dxgiDevice.Get(),
+                                      __uuidof(IDCompositionDevice),
+                                      reinterpret_cast<void**>(compositionDevice_.GetAddressOf())));
+    CHECK_HR(compositionDevice_->CreateTargetForHwnd(hwnd, TRUE, &compositionTarget_));
+    CHECK_HR(compositionDevice_->CreateVisual(&compositionVisual_));
+    CHECK_HR(compositionVisual_->SetContent(swapChain_.Get()));
+    CHECK_HR(compositionTarget_->SetRoot(compositionVisual_.Get()));
+    CHECK_HR(compositionDevice_->Commit());
     return true;
 }
 
@@ -338,14 +391,16 @@ bool RendererD3D11::CreateShaderResources()
 
 bool RendererD3D11::CreateQuadGeometry()
 {
-    const float halfW = 128.0f;
-    const float halfH = 128.0f;
+    // 当前测试角色与窗口均为 256 像素。顶点使用客户区像素坐标，
+    // 后续多角色批处理阶段会把位置和尺寸移入实例数据。
+    const float width  = 256.0f;
+    const float height = 256.0f;
 
     Vertex vertices[] = {
-        { { -halfW, -halfH, 0.0f }, { 0.0f, 1.0f } },
-        { {  halfW, -halfH, 0.0f }, { 1.0f, 1.0f } },
-        { {  halfW,  halfH, 0.0f }, { 1.0f, 0.0f } },
-        { { -halfW,  halfH, 0.0f }, { 0.0f, 0.0f } },
+        { { 0.0f,  height, 0.0f }, { 0.0f, 1.0f } },
+        { { width, height, 0.0f }, { 1.0f, 1.0f } },
+        { { width, 0.0f,  0.0f }, { 1.0f, 0.0f } },
+        { { 0.0f,  0.0f,  0.0f }, { 0.0f, 0.0f } },
     };
     const unsigned short indices[] = { 0, 1, 2, 0, 2, 3 };
 
@@ -379,7 +434,8 @@ bool RendererD3D11::CreateFixedState()
 
     D3D11_BLEND_DESC bDesc{};
     bDesc.RenderTarget[0].BlendEnable           = TRUE;
-    bDesc.RenderTarget[0].SrcBlend              = D3D11_BLEND_SRC_ALPHA;
+    // DirectComposition 要求交换链内容采用预乘 alpha。
+    bDesc.RenderTarget[0].SrcBlend              = D3D11_BLEND_ONE;
     bDesc.RenderTarget[0].DestBlend             = D3D11_BLEND_INV_SRC_ALPHA;
     bDesc.RenderTarget[0].BlendOp               = D3D11_BLEND_OP_ADD;
     bDesc.RenderTarget[0].SrcBlendAlpha         = D3D11_BLEND_ONE;

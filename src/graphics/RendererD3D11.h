@@ -8,6 +8,7 @@
 
 #include <windows.h>
 #include <d3d11.h>
+#include <dcomp.h>
 #include <wrl/client.h>
 #include <string>
 #include <vector>
@@ -52,6 +53,10 @@ public:
     // 将当前精灵绘制到屏幕，并提交到交换链。
     void Render();
 
+    // 根据精灵原图的 alpha 通道判断客户区坐标是否落在可见像素上。
+    // 透明区域返回 false，窗口层据此把鼠标事件交给下方应用。
+    bool HitTest(int clientX, int clientY, unsigned char alphaThreshold = 16) const noexcept;
+
     // 调试：把当前后备缓冲区内容读取并保存为 PNG，用于验证渲染结果。
     void SaveBackBufferToPng(const wchar_t* filePath);
 
@@ -77,6 +82,11 @@ private:
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
     Microsoft::WRL::ComPtr<IDXGISwapChain>      swapChain_;
 
+    // DirectComposition 把带 alpha 的交换链合成到无边框窗口上。
+    Microsoft::WRL::ComPtr<IDCompositionDevice> compositionDevice_;
+    Microsoft::WRL::ComPtr<IDCompositionTarget> compositionTarget_;
+    Microsoft::WRL::ComPtr<IDCompositionVisual> compositionVisual_;
+
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView>      renderTargetView_;
     Microsoft::WRL::ComPtr<ID3D11VertexShader>          vertexShader_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader>           pixelShader_;
@@ -98,6 +108,9 @@ private:
     // 精灵的原始像素尺寸，用于计算显示位置。
     unsigned int spriteWidth_  = 0;
     unsigned int spriteHeight_ = 0;
+
+    // 保留一份 CPU 端 alpha 数据，仅用于逐像素鼠标命中检测。
+    std::vector<unsigned char> spriteAlpha_;
 
     // 顶点缓冲布局信息（供 IASetVertexBuffers 使用）。
     UINT vertexStride_ = sizeof(Vertex);

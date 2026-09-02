@@ -44,6 +44,7 @@ SamplerState spriteSampler : register(s0);
 
 float4 PSMain(VSOutput input) : SV_TARGET
 {
-    // spriteSize 可在这里用于翻转等后续效果；当前直接采样。
-    return spriteTexture.Sample(spriteSampler, input.uv);
+    // DirectComposition 使用预乘 alpha：RGB 必须先乘以透明度。
+    float4 color = spriteTexture.Sample(spriteSampler, input.uv);
+    return float4(color.rgb * color.a, color.a);
 }

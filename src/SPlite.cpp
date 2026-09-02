@@ -5,6 +5,10 @@
 #include "SPlite.h"
 #include "graphics\RendererD3D11.h"
 
+#include <shellapi.h>
+#include <string>
+#include <windowsx.h>
+
 #define MAX_LOADSTRING 100
 
 // 全局变量:
@@ -13,9 +17,33 @@ WCHAR szTitle[MAX_LOADSTRING];                  // 标题栏文本
 WCHAR szWindowClass[MAX_LOADSTRING];            // 主窗口类名
 HWND g_hMainWnd = nullptr;                      // 主窗口句柄（供渲染器使用）
 
-// 渲染器：当前阶段在普通窗口内渲染一张透明 PNG 精灵。
-// 后续阶段会把它扩展成“透明置顶桌宠窗口”的核心渲染组件。
+// 当前只有一个窗口和一个渲染器。多角色阶段会把实例管理移出入口文件。
 splite::RendererD3D11 g_renderer;
+bool g_topMost = true;
+
+constexpr int kPetWindowWidth  = 256;
+constexpr int kPetWindowHeight = 256;
+constexpr UINT kMenuToggleTopMost = 1001;
+constexpr UINT kMenuExit          = 1002;
+
+// 从可执行文件目录向上寻找仓库内素材，避免依赖某台机器的绝对路径。
+std::wstring GetAssetPath(const wchar_t* fileName)
+{
+    wchar_t exePath[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+
+    std::wstring root(exePath);
+    for (int level = 0; level < 3; ++level)
+    {
+        const size_t slash = root.find_last_of(L"\\/");
+        if (slash == std::wstring::npos)
+        {
+            return fileName;
+        }
+        root.resize(slash);
+    }
+    return root + L"\\assets\\" + fileName;
+}
 
 // 此代码模块中包含的函数的前向声明:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -56,16 +84,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
         if (g_renderer.Initialize(g_hMainWnd, clientWidth, clientHeight))
         {
-            // 加载测试精灵。后续会改为统一资源路径，不再依赖绝对路径。
-            g_renderer.LoadSprite(L"D:\\Git\\SPlite\\assets\\sprite_test.png");
+            g_renderer.LoadSprite(GetAssetPath(L"sprite_test.png"));
         }
         else
         {
             // 渲染器失败的场景需在后续阶段完善（如弹出提示、降级为纯 Win32）。
         }
     }
-
-    HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_SPLITE));
 
     MSG msg = {};
     bool running = true;
@@ -79,11 +104,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                 running = false;
                 break;
             }
-            if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
-            {
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
-            }
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
         }
 
         // 渲染一帧。这里会在消息空闲时持续刷新，保证动画连续。
@@ -116,8 +138,9 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
     wcex.hInstance      = hInstance;
     wcex.hIcon          = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_SPLITE));
     wcex.hCursor        = LoadCursor(nullptr, IDC_ARROW);
-    wcex.hbrBackground  = (HBRUSH)(COLOR_WINDOW+1);
-    wcex.lpszMenuName   = MAKEINTRESOURCEW(IDC_SPLITE);
+    // DirectComposition 负责背景透明，因此不使用 GDI 背景刷和传统菜单栏。
+    wcex.hbrBackground  = nullptr;
+    wcex.lpszMenuName   = nullptr;
     wcex.lpszClassName  = szWindowClass;
     wcex.hIconSm        = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_SMALL));
 
@@ -133,8 +156,17 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
    hInst = hInstance;
 
-   HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
+   RECT workArea = {};
+   SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0);
+   const int x = workArea.right - kPetWindowWidth - 32;
+   const int y = workArea.bottom - kPetWindowHeight - 32;
+
+   // 工具窗口不会出现在任务栏；NOREDIRECTIONBITMAP 让 DirectComposition
+   // 直接提供窗口内容；TOPMOST 让宠物保持在普通应用上方。
+   const DWORD exStyle = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP;
+   HWND hWnd = CreateWindowExW(exStyle, szWindowClass, szTitle, WS_POPUP,
+      x, y, kPetWindowWidth, kPetWindowHeight,
+      nullptr, nullptr, hInstance, nullptr);
 
    if (!hWnd)
    {
@@ -159,22 +191,49 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
-    case WM_COMMAND:
+    case WM_NCHITTEST:
         {
-            int wmId = LOWORD(wParam);
-            switch (wmId)
+            POINT point = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+            ScreenToClient(hWnd, &point);
+            if (!g_renderer.HitTest(point.x, point.y))
             {
-            case IDM_ABOUT:
-                DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
-                break;
-            case IDM_EXIT:
+                // 透明像素不拦截鼠标，下方窗口仍然可以正常操作。
+                return HTTRANSPARENT;
+            }
+            return HTCLIENT;
+        }
+    case WM_LBUTTONDOWN:
+        // 把实体像素上的左键按下转换为标题栏拖动，实现无边框窗口拖拽。
+        ReleaseCapture();
+        SendMessageW(hWnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+        return 0;
+    case WM_RBUTTONUP:
+        {
+            POINT point = {};
+            GetCursorPos(&point);
+
+            HMENU menu = CreatePopupMenu();
+            AppendMenuW(menu, MF_STRING | (g_topMost ? MF_CHECKED : 0),
+                        kMenuToggleTopMost, L"始终置顶");
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(menu, MF_STRING, kMenuExit, L"退出 SPlite");
+            SetForegroundWindow(hWnd);
+            const UINT command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+                                                point.x, point.y, 0, hWnd, nullptr);
+            DestroyMenu(menu);
+
+            if (command == kMenuToggleTopMost)
+            {
+                g_topMost = !g_topMost;
+                SetWindowPos(hWnd, g_topMost ? HWND_TOPMOST : HWND_NOTOPMOST,
+                             0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+            else if (command == kMenuExit)
+            {
                 DestroyWindow(hWnd);
-                break;
-            default:
-                return DefWindowProc(hWnd, message, wParam, lParam);
             }
         }
-        break;
+        return 0;
     case WM_PAINT:
         {
             PAINTSTRUCT ps;
