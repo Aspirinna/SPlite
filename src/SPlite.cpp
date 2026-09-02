@@ -35,6 +35,23 @@ constexpr UINT kMenuToggleTopMost = 1001;
 constexpr UINT kMenuExit          = 1002;
 constexpr UINT kMenuToggleStartup = 1003;
 constexpr UINT kTrayCallback      = WM_APP + 42;
+constexpr UINT_PTR kWindowRegionTimer = 1;
+constexpr int kEmergencyExitHotKey = 1;
+
+void UpdateInteractionRegion(HWND hWnd)
+{
+    HRGN interactionRegion = g_renderer.CreateInteractionRegion();
+    if (!interactionRegion)
+    {
+        return;
+    }
+
+    // SetWindowRgn 成功后由 Windows 接管 HRGN；失败时仍由本函数释放。
+    if (SetWindowRgn(hWnd, interactionRegion, FALSE) == 0)
+    {
+        DeleteObject(interactionRegion);
+    }
+}
 
 // 从可执行文件目录向上寻找仓库内素材，避免依赖某台机器的绝对路径。
 std::wstring GetAssetPath(const wchar_t* fileName)
@@ -161,6 +178,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             const float groundY = static_cast<float>(clientHeight - 256);
             g_petSystem.AddPet(L"pet-main", static_cast<float>(clientWidth - 280), groundY);
             g_petSystem.AddPet(L"pet-companion", static_cast<float>(clientWidth - 530), groundY, 0.82f);
+            g_renderer.SetSpriteTransforms(g_petSystem.BuildRenderTransforms());
+            UpdateInteractionRegion(g_hMainWnd);
         }
         else
         {
@@ -260,7 +279,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    // 工具窗口不会出现在任务栏；NOREDIRECTIONBITMAP 让 DirectComposition
    // 直接提供窗口内容；TOPMOST 让宠物保持在普通应用上方。
-   DWORD exStyle = WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP;
+   DWORD exStyle = WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE;
    if (g_topMost)
    {
        exStyle |= WS_EX_TOPMOST;
@@ -277,8 +296,14 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    // 保存主窗口句柄，供 wWinMain 后续初始化渲染器使用。
    g_hMainWnd = hWnd;
 
+   // 创建后先应用空区域，保证渲染器和 alpha 掩码准备完成前绝不覆盖桌面输入。
+   SetWindowRgn(hWnd, CreateRectRgn(0, 0, 0, 0), FALSE);
+
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
+   SetTimer(hWnd, kWindowRegionTimer, 33, nullptr);
+   RegisterHotKey(hWnd, kEmergencyExitHotKey,
+                  MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_F12);
 
    return TRUE;
 }
@@ -292,6 +317,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
+    case WM_TIMER:
+        if (wParam == kWindowRegionTimer)
+        {
+            UpdateInteractionRegion(hWnd);
+        }
+        return 0;
+    case WM_HOTKEY:
+        if (wParam == kEmergencyExitHotKey)
+        {
+            DestroyWindow(hWnd);
+        }
+        return 0;
     case WM_NCHITTEST:
         {
             POINT point = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
@@ -328,6 +365,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             g_petSystem.EndDrag();
             ReleaseCapture();
+            UpdateInteractionRegion(hWnd);
         }
         return 0;
     case WM_RBUTTONUP:
@@ -367,6 +405,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
     case WM_DESTROY:
+        KillTimer(hWnd, kWindowRegionTimer);
+        UnregisterHotKey(hWnd, kEmergencyExitHotKey);
         g_trayIcon.Shutdown();
         g_renderer.Shutdown();
         PostQuitMessage(0);

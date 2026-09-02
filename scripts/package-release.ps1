@@ -26,7 +26,7 @@ if (-not $MSBuildPath -or -not (Test-Path -LiteralPath $MSBuildPath)) {
 
 $buildArguments = @(
     (Join-Path $repositoryRoot "SPlite.vcxproj"),
-    "/t:Rebuild",
+    "/t:Build",
     "/p:Configuration=$Configuration",
     "/p:Platform=x64",
     "/m:1",
@@ -40,7 +40,7 @@ if ($SteamworksSdkDir) {
 & $MSBuildPath @buildArguments
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "全量构建失败，尝试规避 MSVC 14.51 中文源码前端缺陷。"
-    $recoveryArguments = $buildArguments | ForEach-Object { $_ -replace '^/t:Rebuild$', '/t:Build' }
+    $recoveryArguments = $buildArguments
     & $MSBuildPath @recoveryArguments
 }
 if ($LASTEXITCODE -ne 0) {
@@ -49,7 +49,7 @@ if ($LASTEXITCODE -ne 0) {
 if ($LASTEXITCODE -ne 0) { throw "主程序在恢复构建后仍然失败。" }
 
 $testProject = Join-Path $repositoryRoot "SPlite.Tests.vcxproj"
-& $MSBuildPath $testProject /t:Rebuild /p:Configuration=Release /p:Platform=x64 /m:1 /v:minimal /nologo
+& $MSBuildPath $testProject /t:Build /p:Configuration=Release /p:Platform=x64 /m:1 /v:minimal /nologo
 if ($LASTEXITCODE -ne 0) {
     & $MSBuildPath $testProject /t:Build /p:Configuration=Release /p:Platform=x64 /m:1 /v:minimal /nologo
 }

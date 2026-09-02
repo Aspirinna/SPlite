@@ -3,6 +3,8 @@
 #include <d3dcompiler.h>
 #include <wincodec.h>
 #include <dxgi1_2.h>
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 
 #pragma comment(lib, "d3d11.lib")
@@ -242,6 +244,84 @@ int RendererD3D11::HitTestSprite(int clientX, int clientY, unsigned char alphaTh
         }
     }
     return -1;
+}
+
+HRGN RendererD3D11::CreateInteractionRegion(unsigned char alphaThreshold) const
+{
+    std::vector<RECT> rectangles;
+
+    if (!spriteAlpha_.empty())
+    {
+        for (const SpriteTransform& transform : spriteTransforms_)
+        {
+            if (transform.scale <= 0.0f || transform.opacity <= 0.0f)
+            {
+                continue;
+            }
+
+            for (unsigned int y = 0; y < spriteHeight_; ++y)
+            {
+                unsigned int x = 0;
+                while (x < spriteWidth_)
+                {
+                    while (x < spriteWidth_ &&
+                           static_cast<float>(spriteAlpha_[static_cast<size_t>(y) * spriteWidth_ + x]) *
+                               transform.opacity < alphaThreshold)
+                    {
+                        ++x;
+                    }
+                    const unsigned int runStart = x;
+                    while (x < spriteWidth_ &&
+                           static_cast<float>(spriteAlpha_[static_cast<size_t>(y) * spriteWidth_ + x]) *
+                               transform.opacity >= alphaThreshold)
+                    {
+                        ++x;
+                    }
+
+                    if (runStart < x)
+                    {
+                        RECT rectangle = {
+                            static_cast<LONG>(std::floor(transform.x + runStart * transform.scale)),
+                            static_cast<LONG>(std::floor(transform.y + y * transform.scale)),
+                            static_cast<LONG>(std::ceil(transform.x + x * transform.scale)),
+                            static_cast<LONG>(std::ceil(transform.y + (y + 1) * transform.scale))
+                        };
+                        if (rectangle.right > rectangle.left && rectangle.bottom > rectangle.top)
+                        {
+                            rectangles.push_back(rectangle);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (rectangles.empty())
+    {
+        return CreateRectRgn(0, 0, 0, 0);
+    }
+
+    RECT bounds = rectangles.front();
+    for (const RECT& rectangle : rectangles)
+    {
+        bounds.left   = (std::min)(bounds.left, rectangle.left);
+        bounds.top    = (std::min)(bounds.top, rectangle.top);
+        bounds.right  = (std::max)(bounds.right, rectangle.right);
+        bounds.bottom = (std::max)(bounds.bottom, rectangle.bottom);
+    }
+
+    const DWORD regionBytes = static_cast<DWORD>(sizeof(RGNDATAHEADER) +
+                                                  rectangles.size() * sizeof(RECT));
+    std::vector<unsigned char> regionBuffer(regionBytes);
+    auto* regionData = reinterpret_cast<RGNDATA*>(regionBuffer.data());
+    regionData->rdh.dwSize   = sizeof(RGNDATAHEADER);
+    regionData->rdh.iType    = RDH_RECTANGLES;
+    regionData->rdh.nCount   = static_cast<DWORD>(rectangles.size());
+    regionData->rdh.nRgnSize = static_cast<DWORD>(rectangles.size() * sizeof(RECT));
+    regionData->rdh.rcBound  = bounds;
+    std::memcpy(regionData->Buffer, rectangles.data(), rectangles.size() * sizeof(RECT));
+
+    return ExtCreateRegion(nullptr, regionBytes, regionData);
 }
 
 void RendererD3D11::SaveBackBufferToPng(const wchar_t* filePath)

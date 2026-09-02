@@ -74,6 +74,10 @@ public:
     // 返回命中的实例下标；-1 表示透明区域。后加入的实例视为位于上层。
     int HitTestSprite(int clientX, int clientY, unsigned char alphaThreshold = 16) const noexcept;
 
+    // 根据所有角色的 alpha 轮廓创建 Win32 窗口区域。
+    // 返回值的所有权交给调用方；成功传给 SetWindowRgn 后由系统接管。
+    HRGN CreateInteractionRegion(unsigned char alphaThreshold = 16) const;
+
     // 调试：把当前后备缓冲区内容读取并保存为 PNG，用于验证渲染结果。
     void SaveBackBufferToPng(const wchar_t* filePath);
 
