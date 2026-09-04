@@ -35,23 +35,9 @@ constexpr UINT kMenuToggleTopMost = 1001;
 constexpr UINT kMenuExit          = 1002;
 constexpr UINT kMenuToggleStartup = 1003;
 constexpr UINT kTrayCallback      = WM_APP + 42;
-constexpr UINT_PTR kWindowRegionTimer = 1;
 constexpr int kEmergencyExitHotKey = 1;
-
-void UpdateInteractionRegion(HWND hWnd)
-{
-    HRGN interactionRegion = g_renderer.CreateInteractionRegion();
-    if (!interactionRegion)
-    {
-        return;
-    }
-
-    // SetWindowRgn 成功后由 Windows 接管 HRGN；失败时仍由本函数释放。
-    if (SetWindowRgn(hWnd, interactionRegion, FALSE) == 0)
-    {
-        DeleteObject(interactionRegion);
-    }
-}
+constexpr int kHostWindowWidth  = 560;
+constexpr int kHostWindowHeight = 300;
 
 // 从可执行文件目录向上寻找仓库内素材，避免依赖某台机器的绝对路径。
 std::wstring GetAssetPath(const wchar_t* fileName)
@@ -176,10 +162,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         {
             // 两个实例共享同一 PNG/GPU 纹理，用于验证多角色调度和独立拖动。
             const float groundY = static_cast<float>(clientHeight - 256);
-            g_petSystem.AddPet(L"pet-main", static_cast<float>(clientWidth - 280), groundY);
-            g_petSystem.AddPet(L"pet-companion", static_cast<float>(clientWidth - 530), groundY, 0.82f);
+            g_petSystem.AddPet(L"pet-main", 280.0f, groundY);
+            g_petSystem.AddPet(L"pet-companion", 30.0f, groundY, 0.82f);
             g_renderer.SetSpriteTransforms(g_petSystem.BuildRenderTransforms());
-            UpdateInteractionRegion(g_hMainWnd);
         }
         else
         {
@@ -272,20 +257,26 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    RECT workArea = {};
    SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0);
-   const int x = workArea.left;
-   const int y = workArea.top;
-   const int width = workArea.right - workArea.left;
-   const int height = workArea.bottom - workArea.top;
+   // 当前使用紧凑宿主窗口，确保任何输入问题都只局限在宠物附近，
+   // 不允许透明渲染窗口覆盖整个桌面工作区。
+   const int x = workArea.right - kHostWindowWidth - 24;
+   const int y = workArea.bottom - kHostWindowHeight - 24;
 
    // 工具窗口不会出现在任务栏；NOREDIRECTIONBITMAP 让 DirectComposition
    // 直接提供窗口内容；TOPMOST 让宠物保持在普通应用上方。
+   // Debug 版本保留任务栏入口，便于图形捕获、调试和异常退出；
+   // Release 版本使用真正的无任务栏桌宠窗口。
+#if defined(_DEBUG)
+   DWORD exStyle = WS_EX_APPWINDOW | WS_EX_NOREDIRECTIONBITMAP;
+#else
    DWORD exStyle = WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE;
+#endif
    if (g_topMost)
    {
        exStyle |= WS_EX_TOPMOST;
    }
    HWND hWnd = CreateWindowExW(exStyle, szWindowClass, szTitle, WS_POPUP,
-      x, y, width, height,
+      x, y, kHostWindowWidth, kHostWindowHeight,
       nullptr, nullptr, hInstance, nullptr);
 
    if (!hWnd)
@@ -296,12 +287,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    // 保存主窗口句柄，供 wWinMain 后续初始化渲染器使用。
    g_hMainWnd = hWnd;
 
-   // 创建后先应用空区域，保证渲染器和 alpha 掩码准备完成前绝不覆盖桌面输入。
-   SetWindowRgn(hWnd, CreateRectRgn(0, 0, 0, 0), FALSE);
-
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
-   SetTimer(hWnd, kWindowRegionTimer, 33, nullptr);
    RegisterHotKey(hWnd, kEmergencyExitHotKey,
                   MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_F12);
 
@@ -317,12 +304,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
-    case WM_TIMER:
-        if (wParam == kWindowRegionTimer)
-        {
-            UpdateInteractionRegion(hWnd);
-        }
-        return 0;
     case WM_HOTKEY:
         if (wParam == kEmergencyExitHotKey)
         {
@@ -365,7 +346,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             g_petSystem.EndDrag();
             ReleaseCapture();
-            UpdateInteractionRegion(hWnd);
         }
         return 0;
     case WM_RBUTTONUP:
@@ -405,7 +385,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
     case WM_DESTROY:
-        KillTimer(hWnd, kWindowRegionTimer);
         UnregisterHotKey(hWnd, kEmergencyExitHotKey);
         g_trayIcon.Shutdown();
         g_renderer.Shutdown();

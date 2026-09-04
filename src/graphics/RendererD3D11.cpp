@@ -166,11 +166,13 @@ void RendererD3D11::Render()
     context_->IASetVertexBuffers(0, 1, vertexBuffer_.GetAddressOf(), &vertexStride_, &vertexOffset_);
     context_->IASetIndexBuffer(indexBuffer_.Get(), DXGI_FORMAT_R16_UINT, 0);
     context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context_->RSSetState(rasterizerState_.Get());
 
     context_->VSSetShader(vertexShader_.Get(), nullptr, 0);
     context_->VSSetConstantBuffers(0, 1, constantBuffer_.GetAddressOf());
 
     context_->PSSetShader(pixelShader_.Get(), nullptr, 0);
+    context_->PSSetConstantBuffers(0, 1, constantBuffer_.GetAddressOf());
     context_->PSSetShaderResources(0, 1, spriteView_.GetAddressOf());
     context_->PSSetSamplers(0, 1, samplerState_.GetAddressOf());
 
@@ -388,6 +390,7 @@ void RendererD3D11::Shutdown()
     spriteView_.Reset();
     spriteTexture_.Reset();
     spriteAlpha_.clear();
+    rasterizerState_.Reset();
     blendState_.Reset();
     samplerState_.Reset();
     constantBuffer_.Reset();
@@ -549,6 +552,14 @@ bool RendererD3D11::CreateQuadGeometry()
 
 bool RendererD3D11::CreateFixedState()
 {
+    // 2D 精灵不需要背面剔除。显式关闭剔除，避免顶点坐标系或镜像
+    // 改变三角形绕序后整张精灵被默认光栅化状态丢弃。
+    D3D11_RASTERIZER_DESC rasterizerDesc{};
+    rasterizerDesc.FillMode = D3D11_FILL_SOLID;
+    rasterizerDesc.CullMode = D3D11_CULL_NONE;
+    rasterizerDesc.DepthClipEnable = TRUE;
+    CHECK_HR(device_->CreateRasterizerState(&rasterizerDesc, &rasterizerState_));
+
     D3D11_SAMPLER_DESC sDesc{};
     sDesc.Filter         = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
     sDesc.AddressU       = D3D11_TEXTURE_ADDRESS_CLAMP;

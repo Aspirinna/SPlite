@@ -118,6 +118,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Buffer>               constantBuffer_;
     Microsoft::WRL::ComPtr<ID3D11SamplerState>         samplerState_;
     Microsoft::WRL::ComPtr<ID3D11BlendState>           blendState_;
+    Microsoft::WRL::ComPtr<ID3D11RasterizerState>      rasterizerState_;
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D>            spriteTexture_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>   spriteView_;

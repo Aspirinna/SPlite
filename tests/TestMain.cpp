@@ -23,6 +23,7 @@ void TestProceduralAnimator()
     animator.Update(1.0f);
     const splite::AnimationSnapshot idle = animator.GetSnapshot();
     Expect(std::abs(idle.offsetY) <= 3.01f, L"待机浮动必须限制在 3 像素内");
+    Expect(idle.opacity == 1.0f, L"待机动画透明度必须为 1");
 
     animator.SetState(splite::AnimationState::Drag);
     animator.Update(0.016f);
@@ -38,6 +39,8 @@ void TestPetSystem()
     pets.AddPet(L"second", 300.0f, 200.0f, 0.5f);
 
     Expect(pets.BuildRenderTransforms().size() == 2, L"应生成两个角色的渲染实例");
+    Expect(pets.BuildRenderTransforms()[0].opacity == 1.0f,
+           L"角色渲染实例透明度必须继承动画快照");
     Expect(!pets.BeginDrag(9, 0, 0), L"非法角色下标不得开始拖动");
     Expect(pets.BeginDrag(0, 30, 40), L"有效角色应能开始拖动");
     pets.DragTo(-100, -100, 800, 600);
